@@ -207,6 +207,64 @@ html, body {
   background: #333;
   color: #FFFF55;
 }
+#mobile-controls button[disabled] {
+  opacity: 0.35;
+  cursor: default;
+}
+#code-modal {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 62px;
+  background: rgba(0, 0, 0, 0.96);
+  z-index: 40;
+  padding: 10px 14px;
+  overflow-y: auto;
+  border-top: 2px solid #555555;
+}
+#code-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  gap: 8px;
+}
+#code-modal-title {
+  color: #FFFF55;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+#code-modal-close {
+  background: #111;
+  border: 1px solid #555;
+  color: #AAAAAA;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  min-height: 34px;
+  -webkit-tap-highlight-color: transparent;
+}
+#code-modal-close:active, #code-modal-close:hover {
+  color: #FFFF55;
+  background: #222;
+}
+#code-modal-file {
+  border: 1px solid #555555;
+  padding: 2px 4px;
+  font-size: 11px;
+  color: #AAAAAA;
+  margin-bottom: 6px;
+}
+#code-modal-content .code-box {
+  max-height: none !important;
+}
 @media (max-width: 600px), (hover: none) and (pointer: coarse) {
   #text-panel { font-size: 15px; padding: 10px 12px; }
   .choice-item { padding: 10px 8px !important; margin: 6px 0 !important; font-size: 15px; min-height: 44px; display: flex; align-items: center; }
@@ -216,6 +274,7 @@ html, body {
   #text-panel > div { max-width: 100%; }
   .code-box { font-size: 11px; max-height: 100px; }
   #mobile-controls { display: flex; }
+  #code-modal { bottom: 54px; }
 }
   `;
   document.head.appendChild(s);
@@ -1152,14 +1211,69 @@ var statusBar = document.getElementById('status-bar');
   var mc = document.createElement('div');
   mc.id = 'mobile-controls';
   mc.innerHTML =
+    '<button id="mc-code" title="View code" aria-label="View code for this stop">&lt;/&gt;</button>' +
     '<button id="mc-hint" title="Hint" aria-label="Use hint">?</button>' +
     '<button id="mc-music" title="Music" aria-label="Toggle music">\u266B</button>' +
     '<button id="mc-back" title="Back" aria-label="Back to trail select">\u2190</button>';
   document.getElementById('game-container').appendChild(mc);
+  document.getElementById('mc-code').addEventListener('click', function(e) { e.stopPropagation(); toggleCodeModal(); });
   document.getElementById('mc-hint').addEventListener('click', function(e) { e.stopPropagation(); handleEventHint(); });
   document.getElementById('mc-music').addEventListener('click', function(e) { e.stopPropagation(); if (!musicInitialized) initAudio(); toggleMusic(); });
   document.getElementById('mc-back').addEventListener('click', function(e) { e.stopPropagation(); window.location.href = '../'; });
 })();
+
+// Code modal — lets players pull up the current stop's code while answering a question
+(function initCodeModal() {
+  var cm = document.createElement('div');
+  cm.id = 'code-modal';
+  cm.innerHTML =
+    '<div id="code-modal-header">' +
+      '<div id="code-modal-title"></div>' +
+      '<button id="code-modal-close" aria-label="Close code viewer">Close (V)</button>' +
+    '</div>' +
+    '<div id="code-modal-file"></div>' +
+    '<div id="code-modal-content"></div>';
+  document.getElementById('game-container').appendChild(cm);
+  cm.addEventListener('click', function(e) { e.stopPropagation(); });
+  document.getElementById('code-modal-close').addEventListener('click', function(e) {
+    e.stopPropagation();
+    closeCodeModal();
+  });
+})();
+
+var codeModalOpen = false;
+
+function canShowCodeModal() {
+  if (gameState !== STATES.EVENT && gameState !== STATES.RIVER) return false;
+  return !!(TRAIL_DATA.stops[currentStop] && TRAIL_DATA.stops[currentStop].code);
+}
+
+function openCodeModal() {
+  if (!canShowCodeModal()) return;
+  var stop = TRAIL_DATA.stops[currentStop];
+  var useShiki = shikiReady && shikiCache[stop.name];
+  var codeHtml = useShiki ? shikiCache[stop.name] : highlightCode(stop.code.content);
+  var codeBoxClass = 'code-box expanded' + (useShiki ? ' shiki-rendered' : '');
+  var fileLink = TRAIL_DATA.repoUrl
+    ? '<a href="' + TRAIL_DATA.repoUrl + '/blob/main/' + escHtml(stop.code.file) + '" target="_blank" style="color:#55AAFF; text-decoration:none;">' + escHtml(stop.code.file) + '</a>'
+    : escHtml(stop.code.file);
+  document.getElementById('code-modal-title').textContent = stop.name + ' — ' + stop.subtitle;
+  document.getElementById('code-modal-file').innerHTML = '┌─ ' + fileLink + ' ───';
+  document.getElementById('code-modal-content').innerHTML = '<div class="' + codeBoxClass + '">' + codeHtml + '</div>';
+  document.getElementById('code-modal').style.display = 'block';
+  codeModalOpen = true;
+  trackEvent('trail_view_code', { game: getGameSlug(), stop: currentStop });
+}
+
+function closeCodeModal() {
+  document.getElementById('code-modal').style.display = 'none';
+  codeModalOpen = false;
+}
+
+function toggleCodeModal() {
+  if (codeModalOpen) closeCodeModal();
+  else openCodeModal();
+}
 
 // Touch: tap on canvas or text panel = space/enter
 (function initTouchInput() {
@@ -1169,7 +1283,9 @@ var statusBar = document.getElementById('status-bar');
     var tag = e.target.tagName;
     if (tag === 'BUTTON' || tag === 'A') return;
     if (e.target.classList.contains('choice-item') || e.target.classList.contains('stop-opt')) return;
-    if (e.target.closest && (e.target.closest('.choice-item') || e.target.closest('.stop-opt') || e.target.closest('.code-box') || e.target.closest('#mobile-controls'))) return;
+    if (e.target.closest && (e.target.closest('.choice-item') || e.target.closest('.stop-opt') || e.target.closest('.code-box') || e.target.closest('#mobile-controls') || e.target.closest('#code-modal'))) return;
+    // Don't advance game when code modal is open
+    if (codeModalOpen) return;
     // Don't intercept setup difficulty taps (handled by their own onclick)
     if (e.target.closest && e.target.closest('[onclick*="selectDifficulty"]')) return;
 
@@ -1380,7 +1496,8 @@ function renderEventScreen(event) {
     }
     var hintAvail = (PROFESSIONS[difficulty] && PROFESSIONS[difficulty].hintFree) || supplies > 0;
     var hintLabel = (PROFESSIONS[difficulty] && PROFESSIONS[difficulty].hintFree) ? 'H = Free Hint' : 'H = Hint (-1 supply)';
-    choicesHtml += '<div style="margin-top:10px; color:#555555;">' + (isMobile ? 'Tap a choice or swipe \u2191\u2193' : 'Arrow keys + Enter to choose') + (hintAvail ? '  |  ' + (isMobile ? 'Use ? button for hint' : hintLabel) : '') + '</div>';
+    var codeLabel = isMobile ? 'Use </> button for code' : 'V = View code';
+    choicesHtml += '<div style="margin-top:10px; color:#555555;">' + (isMobile ? 'Tap a choice or swipe \u2191\u2193' : 'Arrow keys + Enter to choose') + (hintAvail ? '  |  ' + (isMobile ? 'Use ? button for hint' : hintLabel) : '') + '  |  ' + codeLabel + '</div>';
   } else if (isFortune) {
     choicesHtml = '<div style="color:#55FF55; margin-top:8px;">+20 Health restored!</div>' +
                   '<div style="margin-top:10px;" class="blink">' + actionText('continue') + '</div>';
@@ -1893,6 +2010,7 @@ function checkDeath() {
 }
 
 function advanceFromEvent() {
+  if (codeModalOpen) closeCodeModal();
   currentEventIndex++;
   if (currentEventIndex < pendingEvents.length) {
     if (checkDeath()) return;
@@ -1942,6 +2060,7 @@ function handleStopChoice(choice) {
 }
 
 function enterDeath() {
+  if (codeModalOpen) closeCodeModal();
   gameState = STATES.DEATH;
   showRiver = false;
   trackEvent('trail_death', {
@@ -2112,12 +2231,34 @@ document.addEventListener('keydown', function(e) {
     return;
   }
 
-  // Quit to hub — Escape from any screen, Q from title/death/win
-  if (key === 'Escape' || ((key === 'q' || key === 'Q') && (gameState === STATES.TITLE || gameState === STATES.DEATH || gameState === STATES.WIN))) {
+  // Escape: close code modal if open, otherwise quit to hub
+  if (key === 'Escape') {
+    if (codeModalOpen) {
+      e.preventDefault();
+      closeCodeModal();
+      return;
+    }
     e.preventDefault();
     window.location.href = '../';
     return;
   }
+
+  // Quit to hub — Q from title/death/win
+  if ((key === 'q' || key === 'Q') && (gameState === STATES.TITLE || gameState === STATES.DEATH || gameState === STATES.WIN)) {
+    e.preventDefault();
+    window.location.href = '../';
+    return;
+  }
+
+  // View code shortcut — V during a question pulls up the current stop's code
+  if ((key === 'v' || key === 'V') && (gameState === STATES.EVENT || gameState === STATES.RIVER)) {
+    e.preventDefault();
+    toggleCodeModal();
+    return;
+  }
+
+  // When the code modal is open, don't forward other keys to game logic
+  if (codeModalOpen) return;
 
   // Start audio on first interaction
   if (!musicInitialized) ensureAudio();
